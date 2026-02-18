@@ -13,7 +13,7 @@ This package provides a robust, iterative polynomial distortion calibration tool
 
 1.  Clone this repository:
     ```bash
-    git clone [https://github.com/yourusername/jwst-distortion-calibration.git](https://github.com/yourusername/jwst-distortion-calibration.git)
+    git clone https://github.com/tonysohn/jwst-distortion-calibration.git
     cd jwst-distortion-calibration
     ```
 
