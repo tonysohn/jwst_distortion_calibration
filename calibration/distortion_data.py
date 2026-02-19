@@ -228,7 +228,7 @@ def prepare_ref_catalog(
             mag_column = (
                 "fgs1_magnitude"
                 if "FGS1" in obs_catalog.meta.get("apername", "")
-                else "fgs_magnitude"
+                else "fgs2_magnitude"
             )
         elif inst == "NIRISS":
             mag_column = f"niriss_{filt}_magnitude"
