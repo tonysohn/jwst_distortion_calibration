@@ -109,17 +109,39 @@ def plot_trends(results, output_dir, label):
     plt.close(fig)
 
 
+def get_dynamic_scale(gdx, gdy, target_visual_len=200.0):
+    """Calculates a clean scale multiplier so the longest vector takes up ~10% of the plot."""
+    max_disp = np.max(np.sqrt(gdx**2 + gdy**2))
+    if max_disp < 1e-6:
+        return 5000.0, 0.05, "0.05 pix (5000x)"
+
+    # Calculate ideal multiplier
+    ideal_mult = target_visual_len / max_disp
+
+    # Snap to a clean multiplier (1, 2, 5, 10, 50, etc.)
+    mults = np.array(
+        [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
+    )
+    mult = mults[np.argmin(np.abs(np.log10(mults) - np.log10(ideal_mult)))]
+
+    # Snap the reference legend arrow length to a clean decimal
+    ref_vals = np.array([0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 50.0])
+    ideal_ref = 100.0 / mult
+    ref_val = ref_vals[np.argmin(np.abs(np.log10(ref_vals) - np.log10(ideal_ref)))]
+
+    return mult, ref_val, f"{ref_val:g} pix ({int(mult)}x)"
+
+
 def plot_comparison_models(gx, gy, dx1, dy1, dx2, dy2, output_dir, label):
     """
     Plots smooth polynomial models on a grid.
-    Left: Before (50x) | Right: After (5000x)
+    Left: Before | Right: After (with dynamic scaling)
     """
     fig, axes = plt.subplots(1, 2, figsize=(20, 10))
 
-    scale1 = 50.0  # Left (Before)
-    scale2 = 5000.0  # Right (After)
+    def plot_panel(ax, gdx, gdy, title):
+        mult, ref_val, label_txt = get_dynamic_scale(gdx, gdy)
 
-    def plot_panel(ax, gdx, gdy, title, scale):
         grid_lines = np.linspace(0, 2048, 21)
         for g in grid_lines:
             ax.axhline(g, color="gray", linestyle="-", alpha=0.1)
@@ -135,7 +157,7 @@ def plot_comparison_models(gx, gy, dx1, dy1, dx2, dy2, output_dir, label):
             mag_mas,
             angles="xy",
             scale_units="xy",
-            scale=1.0 / scale,
+            scale=1.0 / mult,
             cmap="viridis",
             width=0.004,
             headlength=0,
@@ -143,26 +165,17 @@ def plot_comparison_models(gx, gy, dx1, dy1, dx2, dy2, output_dir, label):
             pivot="tail",
         )
 
-        if scale < 1000:
-            ref_val = 5.0
-            label_txt = f"5 pix ({int(scale)}x)"
-        else:
-            ref_val = 0.05
-            label_txt = f"0.05 pix ({int(scale)}x)"
-
         ax.quiverkey(q, 0.9, 1.02, ref_val, label_txt, labelpos="E")
         ax.set_xlim(-50, 2098)
         ax.set_ylim(-50, 2098)
         ax.set_aspect("equal")
-        ax.set_title(title, fontsize=16)
+        ax.set_title(f"{title}\n(Scale: {int(mult)}x)", fontsize=16)
         ax.set_xlabel("X (SCI pixels)", fontsize=12)
         ax.set_ylabel("Y (SCI pixels)", fontsize=12)
         return q
 
-    q1 = plot_panel(
-        axes[0], dx1, dy1, "Distortion Model (Before)\n(Scale: 50x)", scale1
-    )
-    q2 = plot_panel(axes[1], dx2, dy2, "Residual Model (After)\n(Scale: 5000x)", scale2)
+    q1 = plot_panel(axes[0], dx1, dy1, "Distortion Model (Before)")
+    q2 = plot_panel(axes[1], dx2, dy2, "Residual Model (After)")
 
     cbar1 = fig.colorbar(q1, ax=axes[0], pad=0.02, shrink=0.76)
     cbar1.set_label("Magnitude (mas)", fontsize=12)

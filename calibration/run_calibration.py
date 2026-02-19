@@ -21,7 +21,7 @@ from .distortion_pipeline import DistortionPipeline, PipelineConfig
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-DATA_DIR = "/Users/tsohn/JWST/NIRISS/9282/F150W"  # Input directory for FITS/XYMQ files
+DATA_DIR = "/Users/tsohn/JWST/FGS/6608/FGS1"  # Input directory for FITS/XYMQ files
 REF_FILE = "/Users/tsohn/JWST/NIRISS/JWST-Distortion-Calibration/calibration/lmc_calibration_field_hst_2017p38_jwstmags.fits"  # Reference catalog (GAIA/HST)
 OUTPUT_DIR = os.path.join(DATA_DIR, "calibration")  # Output directory
 

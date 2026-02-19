@@ -331,7 +331,7 @@ class DistortionPipeline:
             dx_raw = debug_data["dx"]
             dy_raw = debug_data["dy"]
 
-            temp_poly = PolynomialDistortion(degree=5)
+            temp_poly = PolynomialDistortion(degree=self.config.poly_degree)
             cx_before, _ = temp_poly.fit_robust(x_raw, y_raw, dx_raw, scale=max_dim)
             cy_before, _ = temp_poly.fit_robust(x_raw, y_raw, dy_raw, scale=max_dim)
 
