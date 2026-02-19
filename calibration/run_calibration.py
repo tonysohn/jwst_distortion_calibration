@@ -21,7 +21,30 @@ from .distortion_pipeline import DistortionPipeline, PipelineConfig
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-DATA_DIR = "/Users/tsohn/JWST/FGS/6608/FGS1"  # Input directory for FITS/XYMQ files
+DATA_DIR = "/Users/tsohn/JWST/FGS/6608"  # Input directory for FITS/XYMQ files
+
+# List of subdirectories (e.g., filters) to batch process.
+# Leave as an empty list [] to process DATA_DIR directly.
+
+# Use below for NIRISS
+# BATCH_SUBDIRS = [
+#    "F090W",
+#    "F115W",
+#    "F140M",
+#    "F150W",
+#    "F158M",
+#    "F200W",
+#    "F277W",
+#    "F356W",
+#    "F380M",
+#    "F430M",
+#    "F444W",
+#    "F480M",
+# ]
+
+# Use below for FGS
+BATCH_SUBDIRS = ["FGS1", "FGS2"]
+
 REF_FILE = "/Users/tsohn/JWST/NIRISS/JWST-Distortion-Calibration/calibration/lmc_calibration_field_hst_2017p38_jwstmags.fits"  # Reference catalog (GAIA/HST)
 OUTPUT_DIR = os.path.join(DATA_DIR, "calibration")  # Output directory
 
@@ -53,7 +76,7 @@ def get_config_from_header(fits_path):
         return None, None
 
 
-def process_single_file(fits_file):
+def process_single_file(fits_file, output_dir):
     """Runs calibration for a single image."""
     print(f"\nProcessing: {fits_file}")
 
@@ -83,7 +106,7 @@ def process_single_file(fits_file):
         return
 
     config = PipelineConfig(
-        working_dir=OUTPUT_DIR,
+        working_dir=output_dir,  # <-- Pass the dynamic output directory here
         file_root=file_root,
         instrument=detected_instr,
         aperture_name=detected_aper,
@@ -116,17 +139,38 @@ def process_single_file(fits_file):
 
 
 def main():
-    search_pattern = os.path.join(DATA_DIR, "*.fits")
-    fits_files = sorted(glob.glob(search_pattern))
+    # If BATCH_SUBDIRS is populated, process those subdirectories.
+    # If it is empty, process DATA_DIR directly.
+    subdirs = BATCH_SUBDIRS if BATCH_SUBDIRS else [""]
 
-    if not fits_files:
-        print(f"No FITS files found in {DATA_DIR}")
-        return
+    found_any_files = False
 
-    print(f"Found {len(fits_files)} files to process.")
+    for subdir in subdirs:
+        # Construct the path for the current batch
+        current_data_dir = os.path.join(DATA_DIR, subdir) if subdir else DATA_DIR
+        current_output_dir = os.path.join(current_data_dir, "calibration")
 
-    for f in fits_files:
-        process_single_file(f)
+        search_pattern = os.path.join(current_data_dir, "*.fits")
+        fits_files = sorted(glob.glob(search_pattern))
+
+        if not fits_files:
+            continue
+
+        found_any_files = True
+
+        print(f"\n{'=' * 60}")
+        print(f"Processing Directory: {current_data_dir}")
+        print(f"Found {len(fits_files)} files.")
+        print(f"{'=' * 60}")
+
+        # Ensure the output directory exists for this specific subfolder
+        os.makedirs(current_output_dir, exist_ok=True)
+
+        for f in fits_files:
+            process_single_file(f, current_output_dir)
+
+    if not found_any_files:
+        print(f"No FITS files found in {DATA_DIR} or its specified subdirectories.")
 
 
 if __name__ == "__main__":
