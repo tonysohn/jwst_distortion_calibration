@@ -69,15 +69,15 @@ def write_trend_summary(group_name, metrics_list, output_dir):
 
     with open(out_name, "w") as f:
         f.write(f"Distortion Stability Summary: {group_name}\n")
-        f.write("=" * 125 + "\n")
+        f.write("=" * 123 + "\n")
 
         headers = (
-            f"{'Date':<12} | {'Scale X (mas)':<13} | {'X %Chg':<10} | "
-            f"{'Scale Y (mas)':<13} | {'Y %Chg':<10} | {'Skew (arcsec)':<14} | "
-            f"{'Skew %Chg':<10} | {'HO RMS (uas)':<12} | {'HO %Chg':<10}"
+            f"{'Date':<12} | {'Scale X (mas)':<13} | {'X %Chg':>9} | "
+            f"{'Scale Y (mas)':<13} | {'Y %Chg':>9} | {'Skew (arcsec)':<13} | "
+            f"{'Skew %Chg':>9} | {'HO RMS (uas)':<12} | {'HO %Chg':>9}"
         )
         f.write(headers + "\n")
-        f.write("-" * 125 + "\n")
+        f.write("-" * 123 + "\n")
 
         for m in metrics_list:
             date_str = m["date"].strftime("%Y-%m-%d")
@@ -91,11 +91,12 @@ def write_trend_summary(group_name, metrics_list, output_dir):
             )
 
             line = (
-                f"{date_str:<12} | {sx_val:<13.5f} | {sx_pct:>9.4f}% | "
-                f"{sy_val:<13.5f} | {sy_pct:>9.4f}% | {k_val:<14.4f} | "
-                f"{k_pct:>8.4f}% | {h_val:<12.3f} | {h_pct:>8.4f}%"
+                f"{date_str:<12} | {sx_val:>13.5f} | {sx_pct:>8.4f}% | "
+                f"{sy_val:>13.5f} | {sy_pct:>8.4f}% | {k_val:>13.4f} | "
+                f"{k_pct:>8.4f}% | {h_val:>12.3f} | {h_pct:>8.4f}%"
             )
             f.write(line + "\n")
+        f.write("-" * 123 + "\n")
 
     print(f"  -> Generated summary file: {os.path.basename(out_name)}")
 
