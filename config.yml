@@ -3,34 +3,38 @@
 # =============================================================================
 
 paths:
-  # Input directory for FITS/XYMQ files
+  # -> FOR SUPER BATCH: The chaotic folder where all FITS/XYMQ files are dumped
+  raw_data_dir: "/Users/tsohn/JWST/NIRISS/DISTORTION/9282_TEST"
+
+  # -> FOR STANDARD BATCH & OUTPUTS: The organized base directory
   #data_dir: "/Users/tsohn/JWST/NIRISS/DISTORTION/1501/EP1"
   data_dir: "/Users/tsohn/JWST/FGS/DISTORTION/7898"
-  
+
   # Reference catalog (GAIA/HST)
   ref_file: "/Users/tsohn/JWST/JWST-Distortion-Calibration/reference_catalogs/lmc_calibration_field_hst_2017p38_jwstmags.fits"
 
 batch:
-  # List of subdirectories (e.g., filters) to batch process. 
+  # List of subdirectories (e.g., filters) to batch process.
   # Leave as an empty list [] to process data_dir directly.
   subdirs:
-  #  - "F090W"
-  #  - "F115W"
-  #  - "F140M"
-  #  - "F150W"
-  #  - "F158M"
-  #  - "F200W"
-  #  - "F277W"
-  #  - "F356W"
-  #  - "F380M"
-  #  - "F430M"
-  #  - "F444W"
-  #  - "F480M"
-  # Use below for FGS
+    #  - "F090W"
+    #  - "F115W"
+    #  - "F140M"
+    #  - "F150W"
+    #  - "F158M"
+    #  - "F200W"
+    #  - "F277W"
+    #  - "F356W"
+    #  - "F380M"
+    #  - "F430M"
+    #  - "F444W"
+    #  - "F480M"
+    # Use below for FGS
     - "FGS1"
     - "FGS2"
 
 processing:
+  # Shared by ALL scripts to ensure mathematically consistent results!
   obs_q_min: 0.001
   obs_q_max: 0.3
   obs_snr_min: 60.0

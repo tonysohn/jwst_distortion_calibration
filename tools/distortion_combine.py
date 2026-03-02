@@ -27,48 +27,25 @@ try:
     with open(CONFIG_FILE, "r") as f:
         cfg = yaml.safe_load(f)
     DEFAULT_DATA_DIR = cfg["paths"]["data_dir"]
-    BATCH_SUBDIRS = cfg["batch"]["subdirs"] if cfg["batch"]["subdirs"] else [""]
+    BATCH_SUBDIRS = (
+        cfg["manual_batch"]["subdirs"] if cfg["manual_batch"]["subdirs"] else [""]
+    )
 except Exception as e:
-    print(f"Warning: Could not load config.yaml. Using defaults. ({e})")
+    print(f"Warning: Could not load config.yml. Using defaults. ({e})")
     DEFAULT_DATA_DIR = "./data"
     BATCH_SUBDIRS = []
 
 FILE_PATTERN = "*_distortion_coeffs.txt"
 
 
-def get_metadata_from_fits(data_dir):
-    """Scans the data directory for a FITS file to extract Instrument, Aperture, and Filter."""
-    search_pattern = os.path.join(data_dir, "*.fits")
-    files = sorted(glob.glob(search_pattern))
-
-    if not files:
-        return "unknown", "unknown", "unknown"
-
-    try:
-        with fits.open(files[0]) as hdul:
-            header = hdul[0].header
-            instr = header.get("INSTRUME", "unknown").strip().lower()
-            aper = (
-                header.get("APERNAME", header.get("PPS_APER", "unknown"))
-                .strip()
-                .lower()
-            )
-
-            filt_key = header.get("FILTER", "unknown").strip().upper()
-            pupil_key = header.get("PUPIL", "unknown").strip().upper()
-
-            filt = pupil_key.lower() if filt_key == "CLEAR" else filt_key.lower()
-            return instr, aper, filt
-    except Exception:
-        return "unknown", "unknown", "unknown"
-
-
 def read_coefficients(file_list):
-    """Reads coefficients and extracts observation dates from headers."""
+    """Reads coefficients and extracts metadata from headers."""
     data_cube = []
     meta_data = None
     header = None
     obs_dates = []
+    aper = "unknown"
+    filt = "unknown"
 
     for f in file_list:
         try:
@@ -76,13 +53,15 @@ def read_coefficients(file_list):
             tab = ascii.read(f, format="csv", comment="#")
             data_cube.append([[row[4], row[5], row[6], row[7]] for row in tab])
 
-            # Extract Observation Date from comments
+            # Extract Observation Date, Aperture, and Filter from comments
             with open(f, "r") as fh:
                 for line in fh:
                     if "Observation Date:" in line:
-                        date_str = line.split(":")[-1].strip()
-                        obs_dates.append(date_str)
-                        break
+                        obs_dates.append(line.split(":")[-1].strip())
+                    elif "Aperture:" in line:
+                        aper = line.split(":")[-1].strip()
+                    elif "Filter/Pupil:" in line:
+                        filt = line.split(":")[-1].strip()
 
             if meta_data is None:
                 meta_data = [[row[0], row[1], row[2], row[3]] for row in tab]
@@ -90,7 +69,7 @@ def read_coefficients(file_list):
         except Exception as e:
             print(f"Warning: Could not read {f}: {e}")
 
-    return np.array(data_cube), meta_data, header, obs_dates
+    return np.array(data_cube), meta_data, header, obs_dates, aper, filt
 
 
 def compute_robust_mean(data_cube, sigma=2.5):
@@ -204,26 +183,58 @@ def write_master_file(mean_data, meta_data, output_path, obs_date, aper, filt):
             )
 
 
-def main():
+def main(override_data_dir=None, override_subdirs=None):
     parser = argparse.ArgumentParser(
         description="Combine JWST distortion coefficients."
     )
+    # Changed to a positional argument with nargs="?" so it's optional but captures raw inputs
     parser.add_argument(
-        "--data_dir", default=DEFAULT_DATA_DIR, help="Root data directory"
+        "data_dir", nargs="?", default=DEFAULT_DATA_DIR, help="Root data directory"
     )
     parser.add_argument("--sigma", type=float, default=2.5, help="Sigma clip threshold")
-    args = parser.parse_args()
 
-    # Iterate through designated subdirectories (e.g., filters)
-    subdirs = BATCH_SUBDIRS if BATCH_SUBDIRS else [""]
+    args, _ = parser.parse_known_args()
+
+    # Determine the active directory
+    active_data_dir = override_data_dir if override_data_dir else args.data_dir
+
+    # Determine subdirectories to process
+    if override_subdirs is not None:
+        subdirs = override_subdirs
+    else:
+        # SMART AUTO-DISCOVERY: Find any folders that contain a 'results' or 'calibration/results' folder
+        found_subdirs = [
+            d
+            for d in os.listdir(active_data_dir)
+            if os.path.isdir(os.path.join(active_data_dir, d))
+            and (
+                os.path.isdir(os.path.join(active_data_dir, d, "results"))
+                or os.path.isdir(
+                    os.path.join(active_data_dir, d, "calibration", "results")
+                )
+            )
+        ]
+
+        if found_subdirs:
+            subdirs = found_subdirs
+            print(
+                f"Auto-detected {len(subdirs)} subdirectories with results: {subdirs}"
+            )
+        else:
+            subdirs = BATCH_SUBDIRS if BATCH_SUBDIRS else [""]
 
     for subdir in subdirs:
         current_data_dir = (
-            os.path.join(args.data_dir, subdir) if subdir else args.data_dir
+            os.path.join(active_data_dir, subdir) if subdir else active_data_dir
         )
-        current_results_dir = os.path.join(current_data_dir, "calibration", "results")
 
-        # Scan for individual coefficient files, excluding existing master files
+        # Safely search for the results folder
+        current_results_dir = os.path.join(current_data_dir, "results")
+        if not os.path.exists(current_results_dir):
+            current_results_dir = os.path.join(
+                current_data_dir, "calibration", "results"
+            )
+
         search_path = os.path.join(current_results_dir, FILE_PATTERN)
         files = [
             f
@@ -236,43 +247,42 @@ def main():
 
         print(f"\nProcessing {len(files)} files in: {current_results_dir}")
 
-        # 1. Read coefficients and extract dates from headers
-        data_cube, meta_data, _, obs_dates = read_coefficients(files)
+        # 1. Read coefficients and extract metadata from headers
+        data_cube, meta_data, _, obs_dates, aper, filt = read_coefficients(files)
         if data_cube.size == 0:
             continue
 
-        # 2. Determine median observation date for naming and internal metadata
+        # 2. Determine median observation date for naming
         if obs_dates:
             median_date_str = sorted(obs_dates)[len(obs_dates) // 2]
-            date_stamp = median_date_str.replace(
-                "-", ""
-            )  # e.g., 2023-09-12 -> 20230912
+            date_stamp = median_date_str.replace("-", "")
         else:
             median_date_str = "unknown"
             date_stamp = "00000000"
 
-        # 3. Determine Master Filename with timestamp
-        instr, aper, filt = get_metadata_from_fits(current_data_dir)
-        if "fgs" in instr:
-            master_name = f"{instr}_siaf_distortion_{aper}_{date_stamp}.txt"
-        else:
-            master_name = f"{instr}_siaf_distortion_{aper}_{filt}_{date_stamp}.txt"
+        # 3. Determine Master Filename from the extracted metadata
+        # Infer instrument based on the aperture name
+        instr = "fgs" if "fgs" in aper.lower() else "niriss"
 
-        # 4. Calculate robust mean and save master file
+        if instr == "fgs":
+            master_name = f"{instr}_siaf_distortion_{aper.lower()}_{date_stamp}.txt"
+        else:
+            master_name = f"{instr}_siaf_distortion_{aper.lower()}_{filt.lower()}_{date_stamp}.txt"
+
+        # 4. Calculate robust mean
         robust_mean, std_error = compute_robust_mean(data_cube, sigma=args.sigma)
 
-        output_path = os.path.join(current_results_dir, master_name)
+        # Output the master files to the root of the active directory
+        output_path = os.path.join(active_data_dir, master_name)
         write_master_file(
             robust_mean, meta_data, output_path, median_date_str, aper, filt
         )
 
-        # 5. Generate physical stability heatmap and RMS plot
+        # 5. Generate physical stability heatmap and RMS plot in the root directory
         plot_label = master_name.replace(".txt", "")
-        plot_stability(
-            data_cube, robust_mean, meta_data, current_results_dir, plot_label
-        )
+        plot_stability(data_cube, robust_mean, meta_data, active_data_dir, plot_label)
 
-    print("\nCombination Complete.")
+    print(f"\nCombination Complete. Master files saved to: {active_data_dir}")
 
 
 if __name__ == "__main__":

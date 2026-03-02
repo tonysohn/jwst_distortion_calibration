@@ -436,7 +436,7 @@ class DistortionPipeline:
         fits_name = os.path.basename(self.obs_catalog.meta.get("fits_file", "unknown"))
 
         with open(filename, "w") as f:
-            f.write("# NIRISS distortion coefficient file\n")
+            f.write(f"# {self.config.instrument} distortion coefficient file\n")
             f.write(f"# Source file: {fits_name}\n")
             f.write(f"# Aperture: {self.config.aperture_name}\n")
             f.write(f"# Filter/Pupil: {filt}\n")

@@ -27,7 +27,6 @@ from calibration.distortion_pipeline import DistortionPipeline, PipelineConfig
 # =============================================================================
 # LOAD CONFIGURATION
 # =============================================================================
-# Look for config.yaml one directory level up (in the repository root)
 CONFIG_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "config.yml")
 )
@@ -35,20 +34,24 @@ CONFIG_FILE = os.path.abspath(
 with open(CONFIG_FILE, "r") as f:
     cfg = yaml.safe_load(f)
 
+# Standard script uses the organized data_dir and manual_batch subdirs
 DATA_DIR = cfg["paths"]["data_dir"]
 REF_FILE = cfg["paths"]["ref_file"]
-BATCH_SUBDIRS = cfg["batch"]["subdirs"] if cfg["batch"]["subdirs"] else [""]
+BATCH_SUBDIRS = (
+    cfg["manual_batch"]["subdirs"] if cfg["manual_batch"]["subdirs"] else [""]
+)
 
 # Processing Parameters
-OBS_Q_MIN = cfg["processing"]["obs_q_min"]
-OBS_Q_MAX = cfg["processing"]["obs_q_max"]
-OBS_SNR_MIN = cfg["processing"]["obs_snr_min"]
-N_BRIGHT_OBS = cfg["processing"]["n_bright_obs"]
-POS_TOLERANCE = cfg["processing"]["pos_tolerance"]
-INITIAL_TOLERANCE = cfg["processing"]["initial_tolerance"]
-REF_APPLY_PM = cfg["processing"]["ref_apply_pm"]
-USE_GRID_FITTING = cfg["processing"]["use_grid_fitting"]
-GRID_SIZE = cfg["processing"]["grid_size"]
+proc = cfg["processing"]
+OBS_Q_MIN = proc["obs_q_min"]
+OBS_Q_MAX = proc["obs_q_max"]
+OBS_SNR_MIN = proc["obs_snr_min"]
+N_BRIGHT_OBS = proc["n_bright_obs"]
+POS_TOLERANCE = proc["pos_tolerance"]
+INITIAL_TOLERANCE = proc["initial_tolerance"]
+REF_APPLY_PM = proc["ref_apply_pm"]
+USE_GRID_FITTING = proc["use_grid_fitting"]
+GRID_SIZE = proc["grid_size"]
 # =============================================================================
 
 

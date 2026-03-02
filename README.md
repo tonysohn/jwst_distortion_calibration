@@ -48,32 +48,40 @@ This package provides a robust, iterative polynomial distortion calibration tool
     ```
 
 ### 2. Run Calibration (Batch Processing)
+You can run the calibration pipeline in either **Automated** or **Manual** mode depending on how your data is structured.
+
+
+#### Option A: Automated Pipeline (Recommended)
+If you have a chaotic folder containing a mix of filters, detectors, and exposures, use the automated batch script. It reads directly from `raw_data_dir` in your `config.yml`.
+
+```bash
+python tools/run_calibration_batch.py
+```
+
+
 Run the calibration script. This script automatically detects the instrument (NIRISS/FGS), selects the appropriate polynomial degree, and can loop through designated subdirectories.
 
 ```bash
 python tools/run_calibration
 ```
-
 **What this does:**
-* Scans `DATA_DIR` (and optionally iterates through `BATCH_SUBDIRS` like filter folders) for FITS files.
-* Performs iterative disotrtion fitting for each file.
-* Saves individual coefficient files (`*_distortion_coeffs.txt`) and plots to `[DATA_DIR]/[SUBDIR]/calibration/results` and `/plots`.
+* Scans the raw directory, dynamically identifies the instrument and filter/detector for each image, and organizes them into subfolders (e.g., `/F090W/` or `/FGS1_FULL/`).
 
-### 3. Combine Solutions
+* Runs the iterative distortion fitting for every image.
 
-Generate a master distortion solution by robustly averaging the individual results across your processed directories.
+* Automatically triggers the combination script to average the results per filter.
+
+* Deposits the final averaged `..._distortion_coeffs.txt` master files directly into the root `raw_data_dir` for easy access.
+
+
+#### Option B: Manual Pipeline
+If you prefer to process specific subdirectories (e.g., just one filter), you can manually execute the steps using the `data_dir` and `manual_batch` settings in your `config.yml`.
 
 ```bash
-python tools/distortion_combine
+python tools/run_calibration.py
+python tools/distortion_combine.py /path/to/data_dir
 ```
-
-**What this does:**
-* Reads all coefficient files generated in Step 2.
-* Performs a **sigma-clipped average** to remove outlier fits.
-* Generate a stability plot showing the Log-RMS coefficient stability and a 2D spatial stability heatmap (in mas).
-* Write the final averaged `..._distortion_coeffs.txt` file.
-
-### 4 Trend Analysis (Multi-Epoch)
+### 3 Trend Analysis (Multi-Epoch)
 
 Analyze the long-term physical stability of the detector optics across multiple observing epochs. Gather all your generated master coefficient files (from Step 3) across various years/epochs and place them into a single centralized directory.
 
@@ -91,33 +99,39 @@ python tools/distortion_trends.py /path/to/centralized/master_files_dir
 * `*_distortion_coeffs.txt`: SIAF-compatible polynomial coefficients.
    * Columns: `Apername`, `siaf_index`, `exponent_x`, `exponent_y`, `Sci2IdlX`, `Sci2IdlY`, `Idl2SciX`, `Idl2SciY`.
 
-**Plots(`/plots`)**
+**Plots(`results` and `/plots`)**
 * `*_residuals.pdf`: Scatter plot of final residuals $(\Delta x, \Delta y)$ vs zero.
 * `*_trends.pdf`: Spatial trends of residuals across the detector X/Y axes.
 * `*_model_comparison.png`: Vector field showing the distortion model **Before** correction (50x scale) vs **After** correction(5000x scale).
+* `*_stability.png`: 2D heatmap showing spatial RMS variation (in mas) across multiple exposures within a single epoch.
 
 ## Configuration
 
 All pipeline parameters are managed via a central `config.yml` file located in the root of the repository. This file looks like below:
 
 ```yml
+# =============================================================================
+# JWST Distortion Pipeline Configuration
+# =============================================================================
+
 paths:
-  # Input directory for FITS/XYMQ files
-  data_dir: "/path/to/base/directory"
+  # -> FOR AUTOMATED BATCH: The chaotic folder where all raw FITS/XYMQ files are dumped
+  raw_data_dir: "/path/to/raw/directory"
+
+  # -> FOR MANUAL BATCH: The organized base directory
+  data_dir: "/path/to/organized/directory"
+
   # Reference catalog (GAIA/HST)
   ref_file: "/path/to/reference_catalog.fits"
 
-batch:
-  # List of subdirectories (e.g., filters) to batch process.
-  # Leave as an empty list [] to process data_dir directly.
+manual_batch:
+  # Used ONLY by run_calibration.py. (run_calibration_batch.py ignores this)
   subdirs:
     - "F090W"
     - "F115W"
-    - "F150W"
-    # - "FGS1"
-    # - "FGS2"
 
 processing:
+  # Shared by ALL scripts to ensure mathematically consistent results
   obs_q_min: 0.001
   obs_q_max: 0.3
   obs_snr_min: 60.0
