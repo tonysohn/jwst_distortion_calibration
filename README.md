@@ -78,7 +78,7 @@ python tools/run_calibration_batch.py
 Run the calibration script. This script automatically detects the instrument (NIRISS/FGS), selects the appropriate polynomial degree, and can loop through designated subdirectories.
 
 ```bash
-python tools/run_calibration
+python tools/run_calibration.py
 ```
 **What this does:**
 * Scans the raw directory, dynamically identifies the instrument and filter/detector for each image, and organizes them into subfolders (e.g., `/F090W/` or `/FGS1_FULL/`).
