@@ -112,6 +112,18 @@ python tools/distortion_trends.py /path/to/centralized/master_files_dir
 * Extracts precise physical metrics: independent X/Y Pixel Scales (mas), Pixel Skew (arcsec), and Higher-Order Distortion RMS ($\mu$as).
 * Generates a comprehensive time-series 4-panel plot and a detailed ASCII summary table for each group.
 
+### 4. Solution Comparison & Operational Impact
+Evaluate the exact astrometric differences between a reference distortion solution and one or more new solutions. This tool directly calculates the operational impact of updating reference files.
+
+```bash
+# Compare one or multiple files against a master reference
+python tools/distortion_compare.py path/to/reference.txt path/to/comparison1.txt [path/to/comparison2.txt ...]
+```
+**What this does:**
+* Calculates the exact spatial RMS error (in mas) across the entire detector array
+* Identifies and visually highlights the specific "Worst-Case" $(X, Y)$ pixel where the maximum astrometric deviation occurs.
+* Automatically saves a 3-panel diagnostic plot directly adjacent to every comparison file processed.
+
 ## Outputs
 
 **Results(`/results`)**

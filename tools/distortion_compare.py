@@ -5,23 +5,27 @@ Usage:
 
 Description:
     Compares one or more distortion solutions against a master reference solution.
-    Calculates exact spatial errors (mas), local pixel scales, skew changes, 
+    Calculates exact spatial errors (mas), local pixel scales, skew changes,
     and generates a 3-panel diagnostic plot (Quiver, Heatmap, Coeff Diff).
 """
 
 import argparse
 import os
-import numpy as np
+
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
-from astropy.io import ascii
+import numpy as np
 import pysiaf
+from astropy.io import ascii
 
 # --- Optional Publication-Quality Plotting ---
 try:
     import scienceplots
+
     plt.style.use(["science", "no-latex"])
 except ImportError:
     pass
+
 
 def read_distortion(file_path):
     """Safely reads the master distortion file and extracts metadata."""
@@ -56,6 +60,7 @@ def read_distortion(file_path):
         "cy": tab["Sci2IdlY"].data,
     }
 
+
 def get_linear_terms(dist_dict):
     """Extracts the linear transformation terms (Sci2Idl) to compute scale and skew."""
     tab = dist_dict["table"]
@@ -69,12 +74,15 @@ def get_linear_terms(dist_dict):
 
     scale_x = np.sqrt(b**2 + e**2) * 1000  # Convert to mas
     scale_y = np.sqrt(c**2 + f**2) * 1000  # Convert to mas
-    
+
     angle_x = np.arctan2(e, b)
     angle_y = np.arctan2(f, c)
-    skew_arcsec = (np.abs(angle_y - angle_x) - (np.pi / 2)) * 206265
+    skew_arcsec = (
+        np.abs(angle_y - angle_x) - (np.pi / 2)
+    ) * 206265  # radians to arcsec
 
     return scale_x, scale_y, skew_arcsec
+
 
 def compare_solutions(ref, comp, output_dir):
     """Calculates metrics and generates diagnostic plots for a single comparison."""
@@ -106,64 +114,78 @@ def compare_solutions(ref, comp, output_dir):
     max_offset_mas = np.max(spatial_offset_mas)
     max_offset_arcsec = max_offset_mas / 1000.0
     rms_offset_mas = np.sqrt(np.mean(spatial_offset_mas**2))
-    
+
     # Find the specific pixel where the maximum error occurs
-    max_y_idx, max_x_idx = np.unravel_index(np.argmax(spatial_offset_mas), spatial_offset_mas.shape)
+    max_y_idx, max_x_idx = np.unravel_index(
+        np.argmax(spatial_offset_mas), spatial_offset_mas.shape
+    )
     worst_x = x[max_x_idx]
     worst_y = y[max_y_idx]
 
     # --- TERMINAL REPORT ---
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"COMPARING: {comp['date']} vs REFERENCE: {ref['date']}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"[Core Physical Changes]")
     print(f"  Scale X Change (mas) : {delta_sx:+.6f}  (Ref: {ref_sx:.4f})")
     print(f"  Scale Y Change (mas) : {delta_sy:+.6f}  (Ref: {ref_sy:.4f})")
     print(f"  Skew Change (arcsec) : {delta_skew:+.6f}  (Ref: {ref_skew:.4f})")
-    
+
     print(f"\n[Scientific & Operational Impact]")
     print(f"  Spatial RMS Error    : {rms_offset_mas:.4f} mas")
     print(f"  Worst-Case Location  : Pixel X={worst_x:.0f}, Y={worst_y:.0f}")
-    print(f"\n  -> \"At most, using the updated solution vs. the old one will result")
-    print(f"      in an astrometric difference of {max_offset_arcsec:.5f} arcsec ({max_offset_mas:.2f} mas).\"")
-    
-    if "fgs" in ref['aper'].lower():
-        print(f"\n  [FGS Operational Note]")
-        if max_offset_mas < 5.0:
-            print(f"  This difference is strictly negligible. Guide Star Catalog")
-            print(f"  uncertainties naturally dominate this sub-pixel margin.")
-        else:
-            print(f"  This difference exceeds 5 mas. Review required to determine")
-            print(f"  impact on fine guiding performance.")
-    print(f"{'-'*70}")
+    print(f'\n  -> "At most, using the updated solution vs. the old one will result')
+    print(
+        f'      in an astrometric difference of {max_offset_arcsec:.5f} arcsec ({max_offset_mas:.2f} mas)."'
+    )
 
     # --- PLOTTING ---
     fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
     fig.suptitle(f"Distortion Divergence: {comp['date']} vs {ref['date']}", fontsize=16)
 
     # Panel 1: Enhanced Quiver Plot
-    axes[0].quiver(x, y, dx_mas, dy_mas, spatial_offset_mas, cmap='coolwarm', scale_units='xy', angles='xy')
+    axes[0].quiver(
+        x,
+        y,
+        dx_mas,
+        dy_mas,
+        spatial_offset_mas,
+        cmap="coolwarm",
+        scale_units="xy",
+        angles="xy",
+    )
     axes[0].set_title("Vector Field of Change", fontsize=14)
     axes[0].set_xlabel("Detector X (pixels)")
     axes[0].set_ylabel("Detector Y (pixels)")
     axes[0].set_xlim(0, 2048)
     axes[0].set_ylim(0, 2048)
-    axes[0].set_aspect('equal')
+    axes[0].set_aspect("equal")
 
     # Panel 2: Spatial Offset Heatmap
-    im = axes[1].imshow(spatial_offset_mas, origin='lower', extent=[0, 2048, 0, 2048], cmap='magma')
+    im = axes[1].imshow(
+        spatial_offset_mas, origin="lower", extent=[0, 2048, 0, 2048], cmap="magma"
+    )
     axes[1].set_title("Absolute Astrometric Error Impact", fontsize=14)
     axes[1].set_xlabel("Detector X (pixels)")
     axes[1].set_xlim(0, 2048)
     axes[1].set_ylim(0, 2048)
     cbar = fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
     cbar.set_label("Deviation from Reference (mas)", fontsize=12)
-    
+
     # Highlight the worst-case pixel on the heatmap
-    axes[1].plot(worst_x, worst_y, 'w*', markersize=12, markeredgecolor='k', label='Max Error')
-    axes[1].annotate(f'{max_offset_mas:.1f} mas', (worst_x, worst_y), 
-                     textcoords="offset points", xytext=(10,-10), ha='left',
-                     color='white', weight='bold', path_effects=[plt.matplotlib.patheffects.withStroke(linewidth=2, foreground='k')])
+    axes[1].plot(
+        worst_x, worst_y, "w*", markersize=12, markeredgecolor="k", label="Max Error"
+    )
+    axes[1].annotate(
+        f"{max_offset_mas:.1f} mas",
+        (worst_x, worst_y),
+        textcoords="offset points",
+        xytext=(10, -10),
+        ha="left",
+        color="white",
+        weight="bold",
+        path_effects=[path_effects.withStroke(linewidth=2, foreground="k")],
+    )
 
     # Panel 3: Coefficient Difference
     siaf_indices = ref["table"]["siaf_index"]
@@ -172,16 +194,57 @@ def compare_solutions(ref, comp, output_dir):
     diff_cx[diff_cx == 0] = 1e-15
     diff_cy[diff_cy == 0] = 1e-15
 
-    axes[2].plot(siaf_indices, diff_cx, 'o-', color='steelblue', label=r'$|\Delta C_X|$', markersize=5)
-    axes[2].plot(siaf_indices, diff_cy, 's-', color='darkorange', label=r'$|\Delta C_Y|$', markersize=5)
-    axes[2].set_yscale('log')
+    axes[2].plot(
+        siaf_indices,
+        diff_cx,
+        "o-",
+        color="steelblue",
+        label=r"$|\Delta C_X|$",
+        markersize=5,
+    )
+    axes[2].plot(
+        siaf_indices,
+        diff_cy,
+        "s-",
+        color="darkorange",
+        label=r"$|\Delta C_Y|$",
+        markersize=5,
+    )
+    axes[2].set_yscale("log")
     axes[2].set_title("Absolute Coefficient Differences", fontsize=14)
     axes[2].set_xlabel("SIAF Polynomial Index")
     axes[2].set_ylabel("Absolute Difference (Log Scale)")
-    axes[2].grid(True, alpha=0.3, which='both', linestyle=':')
+    axes[2].grid(True, alpha=0.3, which="both", linestyle=":")
     axes[2].legend()
 
     plt.tight_layout()
     out_name = os.path.join(output_dir, f"compare_{comp['date']}_vs_{ref['date']}.png")
     plt.savefig(out_name, dpi=150)
     plt.close(fig)
+    print(f"\n-> Saved diagnostic plot to: {out_name}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Compare JWST Distortion Solutions")
+    parser.add_argument("ref_file", help="Path to the reference distortion .txt file")
+    parser.add_argument(
+        "comp_files", nargs="+", help="Path(s) to the comparison .txt file(s)"
+    )
+    args = parser.parse_args()
+
+    ref_data = read_distortion(args.ref_file)
+    if not ref_data:
+        return
+
+    for comp_path in args.comp_files:
+        comp_data = read_distortion(comp_path)
+        if comp_data:
+            # Automatically determine the exact directory of this specific comparison file
+            comp_dir = os.path.dirname(os.path.abspath(comp_path))
+
+            # Pass that directory directly into the plotting function
+            compare_solutions(ref_data, comp_data, comp_dir)
+
+
+if __name__ == "__main__":
+    main()
