@@ -97,6 +97,9 @@ If you prefer to process specific subdirectories (e.g., just one filter), you ca
 python tools/run_calibration.py
 python tools/distortion_combine.py /path/to/data_dir
 ```
+**Important Directory Targeting:** When running distortion_combine.py manually, you must point it to the root data directory that contains your filter/detector subdirectories (e.g., /path/to/1018/). Do not point it directly at an inner results/ folder. The script uses smart auto-discovery to scan the root folder, find the subdirectories, and extract the results automatically.
+
+
 ### 3 Trend Analysis (Multi-Epoch)
 
 Analyze the long-term physical stability of the detector optics across multiple observing epochs. Gather all your generated master coefficient files (from Step 3) across various years/epochs and place them into a single centralized directory.
