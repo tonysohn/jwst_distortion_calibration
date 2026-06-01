@@ -8,7 +8,7 @@ paths:
 
   # -> FOR STANDARD BATCH & OUTPUTS: The organized base directory
   #data_dir: "/Users/tsohn/JWST/NIRISS/DISTORTION/1501/EP1"
-  data_dir: "/Users/tsohn/JWST/FGS/DISTORTION/1018"
+  data_dir: "/Users/tsohn/JWST/NIRISS/DISTORTION/1086"
 
   # Reference catalog (GAIA/HST)
   ref_file: "/Users/tsohn/JWST/JWST-Distortion-Calibration/reference_catalogs/lmc_calibration_field_hst_2017p38_jwstmags.fits"
@@ -17,21 +17,22 @@ manual_batch:
   # List of subdirectories (e.g., filters) to batch process.
   # Leave as an empty list [] to process data_dir directly.
   subdirs:
-    #  - "F090W"
-    #  - "F115W"
-    #  - "F140M"
-    #  - "F150W"
-    #  - "F158M"
-    #  - "F200W"
-    #  - "F277W"
-    #  - "F356W"
-    #  - "F380M"
-    #  - "F430M"
-    #  - "F444W"
-    #  - "F480M"
+    # Use below for NIRISS
+    - "F090W"
+    - "F115W"
+    - "F140M"
+    - "F150W"
+    - "F158M"
+    - "F200W"
+    - "F277W"
+    - "F356W"
+    - "F380M"
+    - "F430M"
+    - "F444W"
+    - "F480M"
     # Use below for FGS
-    - "FGS1"
-    - "FGS2"
+    #- "FGS1"
+    #- "FGS2"
 
 processing:
   # Shared by ALL scripts to ensure mathematically consistent results!
@@ -39,7 +40,7 @@ processing:
   obs_q_max: 0.3
   obs_snr_min: 60.0
   n_bright_obs: 400
-  pos_tolerance: 0.1
+  pos_tolerance: 0.2
   initial_tolerance: 0.5
   ref_apply_pm: true
   use_grid_fitting: true

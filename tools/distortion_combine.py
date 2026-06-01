@@ -1,187 +1,289 @@
 """
-JWST Distortion Comparison Tool
+JWST Distortion Combination Module
 Usage:
-    python tools/distortion_compare.py path/to/reference.txt path/to/comparison1.txt [path/to/comparison2.txt ...]
+    python -m calibration.distortion_combine
 
 Description:
-    Compares one or more distortion solutions against a master reference solution.
-    Calculates exact spatial errors (mas), local pixel scales, skew changes, 
-    and generates a 3-panel diagnostic plot (Quiver, Heatmap, Coeff Diff).
+    1. Scans for *_distortion_coeffs.txt files across batch subdirectories.
+    2. Calculates a sigma-clipped mean (robust average).
+    3. Generates a physical spatial stability plot.
+    4. Writes a master solution file with standardized naming.
 """
 
 import argparse
+import glob
 import os
-import numpy as np
+
 import matplotlib.pyplot as plt
-from astropy.io import ascii
-import pysiaf
+import numpy as np
+import yaml
+from astropy.io import ascii, fits
+from astropy.stats import sigma_clip
 
-# --- Optional Publication-Quality Plotting ---
+CONFIG_FILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "config.yml")
+)
 try:
-    import scienceplots
-    plt.style.use(["science", "no-latex"])
-except ImportError:
-    pass
+    with open(CONFIG_FILE, "r") as f:
+        cfg = yaml.safe_load(f)
+    DEFAULT_DATA_DIR = cfg["paths"]["data_dir"]
+    BATCH_SUBDIRS = (
+        cfg["manual_batch"]["subdirs"] if cfg["manual_batch"]["subdirs"] else [""]
+    )
+except Exception as e:
+    print(f"Warning: Could not load config.yml. Using defaults. ({e})")
+    DEFAULT_DATA_DIR = "./data"
+    BATCH_SUBDIRS = []
 
-def read_distortion(file_path):
-    """Safely reads the master distortion file and extracts metadata."""
-    try:
-        tab = ascii.read(file_path, format="csv", comment="#")
-    except Exception as e:
-        print(f"Error reading {file_path}: {e}")
-        return None
+FILE_PATTERN = "*_distortion_coeffs.txt"
 
-    # Parse header for metadata
-    obs_date = "Unknown"
-    aper = "Unknown"
-    with open(file_path, "r") as f:
-        for line in f:
-            if "Observation Date:" in line:
-                obs_date = line.split(":")[-1].strip()
-            elif "Aperture:" in line:
-                aper = line.split(":")[-1].strip()
 
-    num_coeffs = len(tab)
-    order = pysiaf.utils.polynomial.polynomial_degree(num_coeffs)
+def read_coefficients(file_list):
+    """Reads coefficients and extracts metadata from headers."""
+    data_cube = []
+    meta_data = None
+    header = None
+    obs_dates = []
+    aper = "unknown"
+    filt = "unknown"
 
-    return {
-        "file": os.path.basename(file_path),
-        "date": obs_date,
-        "aper": aper,
-        "order": order,
-        "table": tab,
-        "ex": tab["exponent_x"].data,
-        "ey": tab["exponent_y"].data,
-        "cx": tab["Sci2IdlX"].data,
-        "cy": tab["Sci2IdlY"].data,
-    }
+    for f in file_list:
+        try:
+            # Read table data
+            tab = ascii.read(f, format="csv", comment="#")
+            data_cube.append([[row[4], row[5], row[6], row[7]] for row in tab])
 
-def get_linear_terms(dist_dict):
-    """Extracts the linear transformation terms (Sci2Idl) to compute scale and skew."""
-    tab = dist_dict["table"]
-    idx_x = np.where((tab["exponent_x"] == 1) & (tab["exponent_y"] == 0))[0][0]
-    idx_y = np.where((tab["exponent_x"] == 0) & (tab["exponent_y"] == 1))[0][0]
+            # Extract Observation Date, Aperture, and Filter from comments
+            with open(f, "r") as fh:
+                for line in fh:
+                    if "Observation Date:" in line:
+                        obs_dates.append(line.split(":")[-1].strip())
+                    elif "Aperture:" in line:
+                        aper = line.split(":")[-1].strip()
+                    elif "Filter/Pupil:" in line:
+                        filt = line.split(":")[-1].strip()
 
-    b = tab["Sci2IdlX"][idx_x]
-    c = tab["Sci2IdlX"][idx_y]
-    e = tab["Sci2IdlY"][idx_x]
-    f = tab["Sci2IdlY"][idx_y]
+            if meta_data is None:
+                meta_data = [[row[0], row[1], row[2], row[3]] for row in tab]
+                header = tab.colnames
+        except Exception as e:
+            print(f"Warning: Could not read {f}: {e}")
 
-    scale_x = np.sqrt(b**2 + e**2) * 1000  # Convert to mas
-    scale_y = np.sqrt(c**2 + f**2) * 1000  # Convert to mas
-    
-    angle_x = np.arctan2(e, b)
-    angle_y = np.arctan2(f, c)
-    skew_arcsec = (np.abs(angle_y - angle_x) - (np.pi / 2)) * 206265
+    return np.array(data_cube), meta_data, header, obs_dates, aper, filt
 
-    return scale_x, scale_y, skew_arcsec
 
-def compare_solutions(ref, comp, output_dir):
-    """Calculates metrics and generates diagnostic plots for a single comparison."""
-    # 1. Linear Metrics
-    ref_sx, ref_sy, ref_skew = get_linear_terms(ref)
-    comp_sx, comp_sy, comp_skew = get_linear_terms(comp)
+def compute_robust_mean(data_cube, sigma=2.5):
+    """Performs sigma-clipping along the file axis."""
+    filtered_data = sigma_clip(
+        data_cube, sigma=sigma, axis=0, maxiters=3, cenfunc="median", stdfunc="std"
+    )
+    robust_mean = np.ma.mean(filtered_data, axis=0)
+    robust_std = np.ma.std(filtered_data, axis=0)
+    n_surviving = np.ma.count(filtered_data, axis=0)
+    std_error = robust_std / np.sqrt(n_surviving)
+    return robust_mean, std_error
 
-    delta_sx = comp_sx - ref_sx
-    delta_sy = comp_sy - ref_sy
-    delta_skew = comp_skew - ref_skew
 
-    # 2. Spatial Grid Evaluation (Sci -> Idl mapping difference)
-    nx, ny = (50, 50)
-    x = np.linspace(1, 2048, nx)
-    y = np.linspace(1, 2048, ny)
-    xg, yg = np.meshgrid(x - 1024.5, y - 1024.5)
+def plot_stability(data_cube, robust_mean, meta_data, output_dir, label):
+    """Generates an improved stability plot using Log-RMS and Spatial Heatmaps."""
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-    xg_ref = pysiaf.utils.polynomial.poly(ref["cx"], xg, yg, order=ref["order"])
-    yg_ref = pysiaf.utils.polynomial.poly(ref["cy"], xg, yg, order=ref["order"])
+    # --- Panel 1: Log-Scale Coefficient RMS ---
+    deviations = data_cube - robust_mean
+    rms_per_coeff = np.sqrt(np.mean(deviations**2, axis=0))
 
-    xg_comp = pysiaf.utils.polynomial.poly(comp["cx"], xg, yg, order=comp["order"])
-    yg_comp = pysiaf.utils.polynomial.poly(comp["cy"], xg, yg, order=comp["order"])
+    axes[0].semilogy(rms_per_coeff[:, 0], "o-", color="steelblue", label="Sci2IdlX")
+    axes[0].semilogy(rms_per_coeff[:, 1], "s-", color="darkorange", label="Sci2IdlY")
+    axes[0].set_title("Coefficient Stability (Log Scale)", fontsize=14)
+    axes[0].set_xlabel("Coefficient Index (0 to N)", fontsize=12)
+    axes[0].set_ylabel("Absolute RMS Scatter", fontsize=12)
+    axes[0].grid(True, alpha=0.3, which="both", linestyle=":")
+    axes[0].legend()
 
-    dx_mas = (xg_comp - xg_ref) * 1000.0
-    dy_mas = (yg_comp - yg_ref) * 1000.0
-    spatial_offset_mas = np.sqrt(dx_mas**2 + dy_mas**2)
+    # --- Panel 2: 2D Spatial Variance Heatmap ---
+    # Evaluate the polynomial for each file to find spatial stability in mas
+    grid_1d = np.linspace(0, 2048, 20)
+    xg, yg = np.meshgrid(grid_1d, grid_1d)
 
-    # 3. Scientific Impact Assessment
-    max_offset_mas = np.max(spatial_offset_mas)
-    max_offset_arcsec = max_offset_mas / 1000.0
-    rms_offset_mas = np.sqrt(np.mean(spatial_offset_mas**2))
-    
-    # Find the specific pixel where the maximum error occurs
-    max_y_idx, max_x_idx = np.unravel_index(np.argmax(spatial_offset_mas), spatial_offset_mas.shape)
-    worst_x = x[max_x_idx]
-    worst_y = y[max_y_idx]
+    N_files = data_cube.shape[0]
+    N_coeffs = data_cube.shape[1]
 
-    # --- TERMINAL REPORT ---
-    print(f"\n{'='*70}")
-    print(f"COMPARING: {comp['date']} vs REFERENCE: {ref['date']}")
-    print(f"{'='*70}")
-    print(f"[Core Physical Changes]")
-    print(f"  Scale X Change (mas) : {delta_sx:+.6f}  (Ref: {ref_sx:.4f})")
-    print(f"  Scale Y Change (mas) : {delta_sy:+.6f}  (Ref: {ref_sy:.4f})")
-    print(f"  Skew Change (arcsec) : {delta_skew:+.6f}  (Ref: {ref_skew:.4f})")
-    
-    print(f"\n[Scientific & Operational Impact]")
-    print(f"  Spatial RMS Error    : {rms_offset_mas:.4f} mas")
-    print(f"  Worst-Case Location  : Pixel X={worst_x:.0f}, Y={worst_y:.0f}")
-    print(f"\n  -> \"At most, using the updated solution vs. the old one will result")
-    print(f"      in an astrometric difference of {max_offset_arcsec:.5f} arcsec ({max_offset_mas:.2f} mas).\"")
-    
-    if "fgs" in ref['aper'].lower():
-        print(f"\n  [FGS Operational Note]")
-        if max_offset_mas < 5.0:
-            print(f"  This difference is strictly negligible. Guide Star Catalog")
-            print(f"  uncertainties naturally dominate this sub-pixel margin.")
-        else:
-            print(f"  This difference exceeds 5 mas. Review required to determine")
-            print(f"  impact on fine guiding performance.")
-    print(f"{'-'*70}")
+    dx_files, dy_files = [], []
 
-    # --- PLOTTING ---
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
-    fig.suptitle(f"Distortion Divergence: {comp['date']} vs {ref['date']}", fontsize=16)
+    for f_idx in range(N_files):
+        dx, dy = np.zeros_like(xg), np.zeros_like(yg)
+        for c_idx in range(N_coeffs):
+            ex = int(meta_data[c_idx][2])
+            ey = int(meta_data[c_idx][3])
+            term = (xg**ex) * (yg**ey)
 
-    # Panel 1: Enhanced Quiver Plot
-    axes[0].quiver(x, y, dx_mas, dy_mas, spatial_offset_mas, cmap='coolwarm', scale_units='xy', angles='xy')
-    axes[0].set_title("Vector Field of Change", fontsize=14)
-    axes[0].set_xlabel("Detector X (pixels)")
-    axes[0].set_ylabel("Detector Y (pixels)")
-    axes[0].set_xlim(0, 2048)
-    axes[0].set_ylim(0, 2048)
-    axes[0].set_aspect('equal')
+            dx += data_cube[f_idx, c_idx, 0] * term
+            dy += data_cube[f_idx, c_idx, 1] * term
 
-    # Panel 2: Spatial Offset Heatmap
-    im = axes[1].imshow(spatial_offset_mas, origin='lower', extent=[0, 2048, 0, 2048], cmap='magma')
-    axes[1].set_title("Absolute Astrometric Error Impact", fontsize=14)
-    axes[1].set_xlabel("Detector X (pixels)")
-    axes[1].set_xlim(0, 2048)
-    axes[1].set_ylim(0, 2048)
-    cbar = fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
-    cbar.set_label("Deviation from Reference (mas)", fontsize=12)
-    
-    # Highlight the worst-case pixel on the heatmap
-    axes[1].plot(worst_x, worst_y, 'w*', markersize=12, markeredgecolor='k', label='Max Error')
-    axes[1].annotate(f'{max_offset_mas:.1f} mas', (worst_x, worst_y), 
-                     textcoords="offset points", xytext=(10,-10), ha='left',
-                     color='white', weight='bold', path_effects=[plt.matplotlib.patheffects.withStroke(linewidth=2, foreground='k')])
+        dx_files.append(dx)
+        dy_files.append(dy)
 
-    # Panel 3: Coefficient Difference
-    siaf_indices = ref["table"]["siaf_index"]
-    diff_cx = np.abs(comp["cx"] - ref["cx"])
-    diff_cy = np.abs(comp["cy"] - ref["cy"])
-    diff_cx[diff_cx == 0] = 1e-15
-    diff_cy[diff_cy == 0] = 1e-15
+    # Standard deviation across files at each pixel * 1000 (arcsec -> mas)
+    spatial_rms_x = np.std(dx_files, axis=0) * 1000.0
+    spatial_rms_y = np.std(dy_files, axis=0) * 1000.0
+    spatial_rms_total = np.sqrt(spatial_rms_x**2 + spatial_rms_y**2)
 
-    axes[2].plot(siaf_indices, diff_cx, 'o-', color='steelblue', label=r'$|\Delta C_X|$', markersize=5)
-    axes[2].plot(siaf_indices, diff_cy, 's-', color='darkorange', label=r'$|\Delta C_Y|$', markersize=5)
-    axes[2].set_yscale('log')
-    axes[2].set_title("Absolute Coefficient Differences", fontsize=14)
-    axes[2].set_xlabel("SIAF Polynomial Index")
-    axes[2].set_ylabel("Absolute Difference (Log Scale)")
-    axes[2].grid(True, alpha=0.3, which='both', linestyle=':')
-    axes[2].legend()
+    im = axes[1].imshow(
+        spatial_rms_total, origin="lower", extent=[0, 2048, 0, 2048], cmap="magma"
+    )
+    axes[1].set_title("Spatial Stability (Sci2Idl Variation)", fontsize=14)
+    axes[1].set_xlabel("X (SCI pixels)", fontsize=12)
+    axes[1].set_ylabel("Y (SCI pixels)", fontsize=12)
+    cbar = fig.colorbar(im, ax=axes[1])
+    cbar.set_label("RMS Variation Across Exposures (mas)", fontsize=12)
 
+    out_file = os.path.join(output_dir, f"{label}_stability.png")
     plt.tight_layout()
-    out_name = os.path.join(output_dir, f"compare_{comp['date']}_vs_{ref['date']}.png")
-    plt.savefig(out_name, dpi=150)
+    plt.savefig(out_file, dpi=150)
     plt.close(fig)
+
+
+def write_master_file(mean_data, meta_data, output_path, obs_date, aper, filt):
+    """Writes the master file with strict column alignment."""
+    with open(output_path, "w") as f:
+        f.write("# MASTER DISTORTION SOLUTION\n")
+        f.write(f"# Observation Date: {obs_date}\n")
+        f.write(f"# Aperture: {aper.upper()}\n")
+        f.write(f"# Filter/Pupil: {filt.upper()}\n")
+        f.write("# Generated by distortion_combine.py\n#\n")
+        f.write(f"# Sigma-clipped mean of {len(meta_data)} coefficients\n#\n")
+
+        w_aper, w_idx, w_exp, w_val = 10, 10, 10, 23
+        h = [
+            "AperName",
+            "siaf_index",
+            "exponent_x",
+            "exponent_y",
+            "Sci2IdlX",
+            "Sci2IdlY",
+            "Idl2SciX",
+            "Idl2SciY",
+        ]
+
+        f.write(
+            f"{h[0]:>{w_aper}} , {h[1]:>{w_idx}} , {h[2]:>{w_exp}} , {h[3]:>{w_exp}} , "
+            f"{h[4]:>{w_val}} , {h[5]:>{w_val}} , {h[6]:>{w_val}} , {h[7]:>{w_val}}\n"
+        )
+
+        for i, row in enumerate(meta_data):
+            # Using the dynamically passed aperture name instead of hardcoded row[0] just to be safe
+            aperture_name = aper.upper()
+            ex, ey = str(row[2]), str(row[3])
+            siaf_idx = f"{int(row[1]):02d}" if str(row[1]).isdigit() else str(row[1])
+
+            f.write(
+                f"{aperture_name:>{w_aper}} , {siaf_idx:>{w_idx}} , {ex:>{w_exp}} , {ey:>{w_exp}} , "
+                f"{mean_data[i, 0]:{w_val}.12e} , {mean_data[i, 1]:{w_val}.12e} , "
+                f"{mean_data[i, 2]:{w_val}.12e} , {mean_data[i, 3]:{w_val}.12e}\n"
+            )
+
+
+def main(override_data_dir=None, override_subdirs=None):
+    parser = argparse.ArgumentParser(
+        description="Combine JWST distortion coefficients."
+    )
+    # Changed to a positional argument with nargs="?" so it's optional but captures raw inputs
+    parser.add_argument(
+        "data_dir", nargs="?", default=DEFAULT_DATA_DIR, help="Root data directory"
+    )
+    parser.add_argument("--sigma", type=float, default=2.5, help="Sigma clip threshold")
+
+    args, _ = parser.parse_known_args()
+
+    # Determine the active directory
+    active_data_dir = override_data_dir if override_data_dir else args.data_dir
+
+    # Determine subdirectories to process
+    if override_subdirs is not None:
+        subdirs = override_subdirs
+    else:
+        # SMART AUTO-DISCOVERY: Find any folders that contain a 'results' or 'calibration/results' folder
+        found_subdirs = [
+            d
+            for d in os.listdir(active_data_dir)
+            if os.path.isdir(os.path.join(active_data_dir, d))
+            and (
+                os.path.isdir(os.path.join(active_data_dir, d, "results"))
+                or os.path.isdir(
+                    os.path.join(active_data_dir, d, "calibration", "results")
+                )
+            )
+        ]
+
+        if found_subdirs:
+            subdirs = found_subdirs
+            print(
+                f"Auto-detected {len(subdirs)} subdirectories with results: {subdirs}"
+            )
+        else:
+            subdirs = BATCH_SUBDIRS if BATCH_SUBDIRS else [""]
+
+    for subdir in subdirs:
+        current_data_dir = (
+            os.path.join(active_data_dir, subdir) if subdir else active_data_dir
+        )
+
+        # Safely search for the results folder
+        current_results_dir = os.path.join(current_data_dir, "results")
+        if not os.path.exists(current_results_dir):
+            current_results_dir = os.path.join(
+                current_data_dir, "calibration", "results"
+            )
+
+        search_path = os.path.join(current_results_dir, FILE_PATTERN)
+        files = [
+            f
+            for f in sorted(glob.glob(search_path))
+            if "MASTER" not in f and "siaf_distortion" not in f
+        ]
+
+        if not files:
+            continue
+
+        print(f"\nProcessing {len(files)} files in: {current_results_dir}")
+
+        # 1. Read coefficients and extract metadata from headers
+        data_cube, meta_data, _, obs_dates, aper, filt = read_coefficients(files)
+        if data_cube.size == 0:
+            continue
+
+        # 2. Determine median observation date for naming
+        if obs_dates:
+            median_date_str = sorted(obs_dates)[len(obs_dates) // 2]
+            date_stamp = median_date_str.replace("-", "")
+        else:
+            median_date_str = "unknown"
+            date_stamp = "00000000"
+
+        # 3. Determine Master Filename from the extracted metadata
+        # Infer instrument based on the aperture name
+        instr = "fgs" if "fgs" in aper.lower() else "niriss"
+
+        if instr == "fgs":
+            master_name = f"{instr}_siaf_distortion_{aper.lower()}_{date_stamp}.txt"
+        else:
+            master_name = f"{instr}_siaf_distortion_{aper.lower()}_{filt.lower()}_{date_stamp}.txt"
+
+        # 4. Calculate robust mean
+        robust_mean, std_error = compute_robust_mean(data_cube, sigma=args.sigma)
+
+        # Output the master files to the root of the active directory
+        output_path = os.path.join(active_data_dir, master_name)
+        write_master_file(
+            robust_mean, meta_data, output_path, median_date_str, aper, filt
+        )
+
+        # 5. Generate physical stability heatmap and RMS plot in the root directory
+        plot_label = master_name.replace(".txt", "")
+        plot_stability(data_cube, robust_mean, meta_data, active_data_dir, plot_label)
+
+    print(f"\nCombination Complete. Master files saved to: {active_data_dir}")
+
+
+if __name__ == "__main__":
+    main()
