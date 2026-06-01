@@ -59,8 +59,8 @@ This package provides a robust, iterative polynomial distortion calibration tool
   adjust_wcs jw01501002001_02101_00001_nis_cal.fits -u --overwrite -r -1.042e-3 -d 1.194e-4
     # -u —overwrite updates the WCS of the original image.
     # (Alternatively, use --suffix wcsadj_cal to create a new image.)
-    # -r applies the RA offset
-    # -d applies the Dec offset
+    # -r applies the RA offset in degrees
+    # -d applies the Dec offset in degrees
     ```
 
 ### 2. Run Calibration (Batch Processing)
