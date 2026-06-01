@@ -67,7 +67,7 @@ This package provides a robust, iterative polynomial distortion calibration tool
 You can run the calibration pipeline in either **Automated** or **Manual** mode depending on how your data is structured.
 
 
-#### Option A: Automated Pipeline (Recommended)
+#### Option A: Automated Pipeline
 If you have a chaotic folder containing a mix of filters, detectors, and exposures, use the automated batch script. It reads directly from `raw_data_dir` in your `config.yml`.
 
 ```bash
